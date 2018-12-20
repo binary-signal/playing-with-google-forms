@@ -4,10 +4,14 @@ url = "https://pypi.org/simple"
 verify_ssl = true
 
 [dev-packages]
+pylint = "*"
 
 [packages]
 beautifulsoup4 = "*"
 newspaper3k = "*"
+watson-developer-cloud = "*"
+selenium = "*"
+requests = "*"
 
 [requires]
 python_version = "3.7"
