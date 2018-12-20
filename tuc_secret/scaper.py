@@ -3,7 +3,7 @@ from abc import ABCMeta, abstractmethod
 from bs4 import BeautifulSoup
 
 
-class BaseScaper(metaclass=ABCMeta):
+class BaseScraper(metaclass=ABCMeta):
     @abstractmethod
     def __init__(self):
         pass
@@ -13,7 +13,7 @@ class BaseScaper(metaclass=ABCMeta):
         raise NotImplementedError
 
 
-class Kolouri(BaseScaper):
+class Kolouri(BaseScraper):
     def __init__(self, page):
         self.page = page
         self.urls = []

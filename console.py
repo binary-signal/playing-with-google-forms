@@ -82,7 +82,10 @@ def main():
                         datefmt='%Y-%m-%d %H:%M:%S', )
     tcpserver = LogRecordSocketReceiver()
     print('About to start TCP server...')
-    tcpserver.serve_until_stopped()
+    try:
+        tcpserver.serve_until_stopped()
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == '__main__':
