@@ -22,7 +22,7 @@ from newspaper import Article, ArticleException
 
 from .exceptions import ExceptionHttpStatusCode, ExceptionThreadDied
 from .log import *
-from .scaper import Kolouri
+from .scraper import Kolouri
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(process)d %(threadName)-10s [%(levelname)-5.5s]  %(message)s",
