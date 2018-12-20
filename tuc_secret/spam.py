@@ -53,12 +53,6 @@ form_metadata = {'school': 'entry.1328574731',  # make up friendly names for for
                  'email': 'emailAddress'
                  }
 
-# form_metadata = {'school': 'entry.1328574731',  # make up friendly names for form attributes
-#                 'nickname': 'entry.496190142',
-#                 'secret': 'entry.213429315',
-#                 'email': 'emailAddress'
-#                 }
-
 metadataLock = threading.Lock()  # shared lock for form_metadata
 
 
@@ -78,7 +72,7 @@ def httpRequest(url):
             return response.text
 
 
-def scapePage(url, pageScraper):
+def scrapePage(url, pageScraper):
     raw_html = httpRequest(url)
 
     if raw_html:
@@ -103,7 +97,7 @@ def extractContent(url, lang='el'):
 
 def check_for_updates(queue, target_url):
     while True:
-        urls = scapePage(target_url, Kolouri)
+        urls = scrapePage(target_url, Kolouri)
         # logging.info("found {} urls".format(len(urls)))
 
         for url in urls:
