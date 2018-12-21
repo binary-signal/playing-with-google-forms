@@ -1,59 +1,44 @@
 # -*- coding: utf-8 -*-
 
+import argparse
 import datetime
 import logging
+import logging.handlers
 import multiprocessing
+import queue
 import random
-import re
 import string
 import sys
 import threading
 import time
 from collections import deque
-from multiprocessing import Process, Queue
-from queue import PriorityQueue, Empty, Full
-from threading import Thread
 from timeit import default_timer as timer
-from urllib.parse import unquote
 
 import requests
-from bs4 import BeautifulSoup
 from newspaper import Article, ArticleException
 
 from .exceptions import ExceptionHttpStatusCode, ExceptionThreadDied
-from .log import *
 from .scraper import Kolouri
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(process)d %(threadName)-10s [%(levelname)-5.5s]  %(message)s",
-                    datefmt='%Y-%m-%d %H:%M:%S', )
+rootLogger = logging.getLogger('')
+rootLogger.setLevel(logging.INFO)
+
+socketHandler = logging.handlers.SocketHandler('localhost', logging.handlers.DEFAULT_TCP_LOGGING_PORT)
+rootLogger.addHandler(socketHandler)
 
 logging.getLogger(__name__)
 
-MEM_SIZE = 128  # queue max size
+MEM_SIZE = 128  # max size for response queue
 
-# FIXME change sync time to 120 sec
-SYNC_SLEEP = 120  # sleep time intervals for threads
-STEP_SLEEP = 2
-POST_SLEEP = 2
-MAIN_SLEEP = 3
-UPDATE_SLEEP = 30
-
-GROUP_URL = "https://www.facebook.com/pg/TUCSecrets/about/"
-TARGET_URL = "https://docs.google.com/forms/d/e/1FAIpQLSedrGe0vpdK2FfwdpMTU1VUl8AEuYquC8UeH4atA66hUA5TRQ/viewform"
-
-# TARGET_URL = "https://docs.google.com/forms/d/e/1FAIpQLSe1Pdyl6a-Ba5qXtNFKyXy82Gwsrwpmc616q1CrgF1aAoP3GA/viewform"
-TARGET_URL = TARGET_URL.rsplit("/", 1)[0] + "/formResponse?"
-
-urlLock = threading.Lock()  # shared lock for TARGET_URL
+POST_SLEEP = 10
+STATS_DELAY = 3
+FETCH_DELAY = 30
 
 form_metadata = {'school': 'entry.1328574731',  # make up friendly names for form attributes
-                 'nickname': 'entry.1373873555',
-                 'secret': 'entry.1383662701',
+                 'nickname': 'entry.657519342',
+                 'secret': 'entry.1452404370',
                  'email': 'emailAddress'
                  }
-
-metadataLock = threading.Lock()  # shared lock for form_metadata
 
 
 def httpRequest(url):
@@ -95,7 +80,7 @@ def extractContent(url, lang='el'):
         return text, len(text)
 
 
-def check_for_updates(queue, target_url):
+def fetchResponces(q, target_url):
     while True:
         urls = scrapePage(target_url, Kolouri)
         # logging.info("found {} urls".format(len(urls)))
@@ -110,21 +95,18 @@ def check_for_updates(queue, target_url):
             else:
                 sentences = text.split('.')
                 for sentence in sentences:
-                    if re.search("κουλούρι", sentence, re.IGNORECASE):
-                        continue
-
                     priority = random.randint(1, MEM_SIZE)
                     try:
-                        queue.put((priority, sentence), block=False)
-                    except Full:
+                        q.put((priority, sentence), block=False)
+                    except queue.Full:
                         logging.warning("text queue is full, waiting 30 sec")
                         time.sleep(30)
 
                 # logging.info("added {} messages to queue".format(len(sentences)))
-        time.sleep(UPDATE_SLEEP)
+        time.sleep(FETCH_DELAY)
 
 
-def post_secret(queue, total_counter, ack_counter):
+def post_secret(q, total_counter, ack_counter, url):
     try:
         with open('names.txt', 'rb') as file:
             names = file.readlines()
@@ -136,13 +118,12 @@ def post_secret(queue, total_counter, ack_counter):
     names = [name[0].capitalize() + name[1:].lower() for name in names]
 
     schools = ["ΜΠΔ", "ΗΜΜΥ", "ΑΡΜΗΧ", "ΜΗΧΟΠ", "ΜΗΠΕΡ"]
-
     while True:
         try:
-            secret = queue.get(block=False)
-        except Empty:
-            logging.warning("deque failed, queue empty! sleep for 10 sec")
-            time.sleep(10)
+            secret = q.get(block=False)
+        except queue.Empty:
+            logging.warning("response queue is empty, sleep for 5 sec")
+            time.sleep(5)
             continue
 
         # make up random form data
@@ -157,13 +138,12 @@ def post_secret(queue, total_counter, ack_counter):
                      form_metadata['email']: email_entry
                      }
 
+        total_counter.count()
         try:
-            total_counter.count()
-            with urlLock:
-                response = requests.post(TARGET_URL, data=form_data)
+            response = requests.post(url, data=form_data)
+
             if response.status_code != 200:
-                raise ExceptionHttpStatusCode(
-                    "requests received {} status code /POST".format(response.status_code))
+                raise ExceptionHttpStatusCode("requests received {} status code /POST".format(response.status_code))
         except requests.exceptions.RequestException as e:
             logging.error(e)
             continue
@@ -172,36 +152,12 @@ def post_secret(queue, total_counter, ack_counter):
             continue
 
         response = response.text[-3000:]
-        if "freebirdFormviewerViewResponseConfirmationMessage" in response:
-            ack_counter.count()
-            # logging.info("response submitted ")
-        else:
+        if "freebirdFormviewerViewResponseConfirmationMessage" not in response:
             logging.warning("got a strange response from google forms")
+            continue
 
-
-def check_form_url(fbUrl=GROUP_URL):
-    while True:
-        response = httpRequest(fbUrl)
-        soup = BeautifulSoup(response, 'html.parser')
-
-        divs = soup.find_all('div', class_='_4bl9')
-
-        for div in divs:
-            hrefs = div.find_all('a')
-            for href in hrefs:
-                if "docs.google" in str(href):
-                    href = str(href)
-                    raw = href.split(';')[0]
-                    raw = raw.rsplit("\"")[-1]
-                    raw = raw.split("?", 1)[1][2:]
-                    url = unquote(raw)
-                    url = url.rsplit("&", 1)[0]
-                    with urlLock:
-                        target_url = url.rsplit("/", 1)[0] + "/formResponse?"
-
-                    logging.info("synced google form url from fb")
-
-        time.sleep(SYNC_SLEEP)
+        ack_counter.count()
+        # logging.info("response submitted ")
 
 
 class SafeCounter(object):
@@ -213,50 +169,54 @@ class SafeCounter(object):
         with self.lock:
             self.cur_count += 1
 
-    def count_many(self, n):
+    def reset(self):
         with self.lock:
-            self.cur_count += n
+            self.cur_count = 0
 
-    def getCount(self):
+    def get_count(self):
         with self.lock:
             return self.cur_count
 
 
-def do_work(q):
-    messages = PriorityQueue(MEM_SIZE)
-    postThread = None
-    dataThread = None
+def do_work(q, url):
+    messages = queue.PriorityQueue(MEM_SIZE)
 
     total_counter = SafeCounter()
     ack_counter = SafeCounter()
 
     try:
-        # print("start data thread ...", end="")
-        dataThread = Thread(target=check_for_updates, args=(messages, 'http://www.tokoulouri.com'), daemon=True)
+        dataThread = threading.Thread(target=fetchResponces, args=(messages, 'http://www.tokoulouri.com'),
+                                      daemon=True)
         dataThread.start()
-        # print("OK")
 
-        # print("start spam thread ...", end="")
-        postThread = Thread(target=post_secret, args=(messages, total_counter, ack_counter), daemon=True)
+        postThread = threading.Thread(target=post_secret, args=(messages, total_counter, ack_counter, url),
+                                      daemon=True)
         postThread.start()
-        # print("OK")
-
     except Exception as e:
-        print("FAIL\n")
         logging.error(e)
         sys.exit(e)
 
     try:
         while True:
             mem_load = int(100 * (messages.qsize() / MEM_SIZE))
-            total = total_counter.getCount()
-            ack = ack_counter.getCount()
+            total = total_counter.get_count()
+            ack = ack_counter.get_count()
 
+            total_counter.reset()
+            ack_counter.reset()
+
+            #logging.info("total {:5} ack {:5d} meter".format(total, ack))
             try:
                 spam_meter = int(100 * (ack / total))
             except ZeroDivisionError:
-                q.put(None)
-                time.sleep(MAIN_SLEEP)
+                q.put({
+                    "thread": 0,
+                    "mem_load": 0,
+                    "spam_meter": 0,
+                    "ack": 0,
+                    "total": 0
+                })
+                time.sleep(STATS_DELAY)
                 continue
 
             threads = threading.activeCount()
@@ -271,13 +231,11 @@ def do_work(q):
                 "total": total
             }
             q.put(stats)
-
-            time.sleep(MAIN_SLEEP)
-    except Full:
-        logging.error("put error proccess queue")
+            time.sleep(STATS_DELAY)
+    except queue.Full:
+        logging.error("status queue is full")
     except ExceptionThreadDied:
         pass
-
     except KeyboardInterrupt:
         pass
     except Exception as e:
@@ -287,35 +245,40 @@ def do_work(q):
 
 
 if __name__ == "__main__":
-    print("\t\t * TUC Secrets - spam edition *\n\n\n")
-    logging.info("\n\n\n\n\n---------------- Session ----------------")
-    process_queue = Queue()
+    parser = argparse.ArgumentParser()
 
-    cores = None
-    if not cores:
+    parser.add_argument("-w", action="store", dest="workers", help="number of worker process", type=int)
+    parser.add_argument("URL", action="store", help="google form url ", type=str)
+
+    args = parser.parse_args()
+
+    if "docs.google.com/forms/" not in args.URL:
+        sys.exit("Not supported URL")
+
+    form_url = args.URL
+    form_url = form_url.rsplit("/", 1)[0] + "/formResponse?"
+
+    if not args.workers:
         cores = multiprocessing.cpu_count()
-    workers = cores * 2
-    total_counter = SafeCounter()
-    ack_counter = SafeCounter()
-    switch = True
+        workers = cores * 2
+    else:
+        workers = args.workers
 
-    print("start sync thread ...", end="")
-    try:
-        syncThread = Thread(target=check_form_url, daemon=True)
-        syncThread.start()
-        sys.stdout.flush()
-        print("OK\n")
-    except Exception as e:
-        print("FAIL\n")
-        logging.error(e)
-        sys.exit(e)
+    process_queue = multiprocessing.Queue()  # forward messages to main process
+
+    responsesNum = 0
+    attemptsNum = 0
+
+    print("\n\n\t\t * Google Forms - spam edition *\n\n\n")
+    logging.info("\n\n\n\n\n---------------- Session ----------------")
+    print("url: {}\n\n".format(form_url))
 
     try:
         for w in range(1, workers + 1):
-            p = Process(target=do_work, args=(process_queue,))
+            p = multiprocessing.Process(target=do_work, args=(process_queue, form_url))
             p.daemon = True
             p.start()
-            time.sleep(0.2)
+            time.sleep(0.25)
             print("Workers ready {}".format(w), end="\r")
 
         t_start = timer()
@@ -325,37 +288,25 @@ if __name__ == "__main__":
         while True:
             try:
                 stat = process_queue.get(block=False)
-            except Empty:
+            except queue.Empty:
                 pass
             else:
-                if stat:
-                    ack_counter.count_many(stat['ack'])
-                    total_counter.count_many(stat['total'])
+                attemptsNum = attemptsNum + stat['total']
+                responsesNum = responsesNum + stat['ack']
 
-                    avg_buffer.append(stat['mem_load'])
-                    avg_buffer.popleft()
-                    mem_load = int(sum(avg_buffer) / len(avg_buffer))
-                    t_now = int(timer() - t_start)
+                avg_buffer.append(stat['mem_load'])
+                avg_buffer.popleft()
+                mem_load = int(sum(avg_buffer) / len(avg_buffer))
 
-                    t_now = str(datetime.timedelta(seconds=t_now))
-
-                    display = "Workers {:3d} | Mem Load {:3d}% |Ack: {:3d} | Total: {:6} {} \n".format(workers,
-                                                                                                       mem_load,
-                                                                                                       ack_counter.getCount(),
-                                                                                                       total_counter.getCount(),
-                                                                                                       t_now)
-
-                    if switch:
-                        display = display + "[ ] "
-                        switch = False
-                    else:
-                        display = display + "[*] "
-                        switch = True
-
+                display = "Workers {:3d} | Mem Load {:3d}% | Ack: {:3d} | " \
+                          "Total: {:6} ".format(workers, mem_load,
+                                                responsesNum,
+                                                attemptsNum)
             finally:
-
-                print(display, end="\r")
-                time.sleep(0.2)
+                t_now = int(timer() - t_start)
+                t_now = str(datetime.timedelta(seconds=t_now))
+                print(display + "Uptime: {:10}".format(t_now), end="\r")
+                time.sleep(0.25)
     except KeyboardInterrupt as e:
         logging.info("session END")
         sys.stdout.flush()
