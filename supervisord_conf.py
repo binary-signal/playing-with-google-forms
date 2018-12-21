@@ -4,14 +4,14 @@ cwd = os.getcwd()
 
 config = """
 ; ==================================
-;  tuc secrets  supervisor
+;  google form  supervisor
 ; ==================================
 
 ; the name of your supervisord program
-[program:TucSecrets]
+[program:gform]
 
 ; Set full path to news producer  program if using virtualenv
-command={}/.venv/bin/python tuc_secret.spam
+command={}/.venv/bin/python gform.spam
 
 
 ; The directory to my project
@@ -53,7 +53,7 @@ killasgroup=true
 priority=998
 """.format(cwd, cwd)
 
-with open("tucsecret.conf", "w") as fp:
+with open("gform.conf", "w") as fp:
     fp.write(config)
 
-print("created config file  tucsecret.conf to current directory")
+print("created config file  gform.conf to current directory")
