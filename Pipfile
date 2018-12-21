@@ -9,8 +9,6 @@ pylint = "*"
 [packages]
 beautifulsoup4 = "*"
 newspaper3k = "*"
-watson-developer-cloud = "*"
-selenium = "*"
 requests = "*"
 
 [requires]
