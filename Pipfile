@@ -10,6 +10,8 @@ pylint = "*"
 beautifulsoup4 = "*"
 newspaper3k = "*"
 requests = "*"
+aiohttp = "*"
+aiofiles = "*"
 
 [requires]
 python_version = "3.7"

@@ -34,9 +34,9 @@ POST_SLEEP = 10
 STATS_DELAY = 3
 FETCH_DELAY = 30
 
-form_metadata = {'school': 'entry.1328574731',  # make up friendly names for form attributes
-                 'nickname': 'entry.657519342',
-                 'secret': 'entry.1452404370',
+form_metadata = {'school': 'entry.861510541',  # make up friendly names for form attributes
+                 'nickname': 'entry.2136866393',
+                 'secret': 'entry.932649798',
                  'email': 'emailAddress'
                  }
 
@@ -99,10 +99,9 @@ def fetchResponces(q, target_url):
                     try:
                         q.put((priority, sentence), block=False)
                     except queue.Full:
-                        logging.warning("text queue is full, waiting 30 sec")
-                        time.sleep(30)
+                        pass
 
-                # logging.info("added {} messages to queue".format(len(sentences)))
+                #logging.info("added {} messages to queue".format(len(sentences)))
         time.sleep(FETCH_DELAY)
 
 
@@ -122,8 +121,8 @@ def post_secret(q, total_counter, ack_counter, url):
         try:
             secret = q.get(block=False)
         except queue.Empty:
-            logging.warning("response queue is empty, sleep for 5 sec")
-            time.sleep(5)
+            logging.warning("response queue is empty, wait 5sec")
+            time.sleep(random.random() + 4)
             continue
 
         # make up random form data
@@ -157,7 +156,7 @@ def post_secret(q, total_counter, ack_counter, url):
             continue
 
         ack_counter.count()
-        # logging.info("response submitted ")
+        #logging.info("response submitted ")
 
 
 class SafeCounter(object):
@@ -205,7 +204,7 @@ def do_work(q, url):
             total_counter.reset()
             ack_counter.reset()
 
-            #logging.info("total {:5} ack {:5d} meter".format(total, ack))
+            # logging.info("total {:5} ack {:5d} meter".format(total, ack))
             try:
                 spam_meter = int(100 * (ack / total))
             except ZeroDivisionError:
@@ -258,6 +257,9 @@ if __name__ == "__main__":
     form_url = args.URL
     form_url = form_url.rsplit("/", 1)[0] + "/formResponse?"
 
+    if "https://" not in form_url:
+        form_url = "https://" + form_url
+
     if not args.workers:
         cores = multiprocessing.cpu_count()
         workers = cores * 2
@@ -278,7 +280,7 @@ if __name__ == "__main__":
             p = multiprocessing.Process(target=do_work, args=(process_queue, form_url))
             p.daemon = True
             p.start()
-            time.sleep(0.25)
+            time.sleep(random.random())
             print("Workers ready {}".format(w), end="\r")
 
         t_start = timer()
